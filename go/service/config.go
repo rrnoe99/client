@@ -123,7 +123,8 @@ func (h ConfigHandler) ClearValue(_ context.Context, path string) error {
 }
 
 func (h ConfigHandler) GetExtendedStatus(ctx context.Context, sessionID int) (res keybase1.ExtendedStatus, err error) {
-	defer h.G().Trace("ConfigHandler::GetExtendedStatus", func() error { return err })()
+	m := libkb.NewMetaContext(ctx, h.G())
+	defer m.CTrace("ConfigHandler::GetExtendedStatus", func() error { return err })()
 
 	res.Standalone = h.G().Env.GetStandalone()
 	res.LogDir = h.G().Env.GetLogDir()
@@ -136,7 +137,7 @@ func (h ConfigHandler) GetExtendedStatus(ctx context.Context, sessionID int) (re
 	err = h.G().GetFullSelfer().WithSelf(ctx, func(me *libkb.User) error {
 		device, err := me.GetComputedKeyFamily().GetCurrentDevice(h.G())
 		if err != nil {
-			h.G().Log.Debug("| GetCurrentDevice failed: %s", err)
+			m.CDebugf("| GetCurrentDevice failed: %s", err)
 			res.DeviceErr = &keybase1.LoadDeviceErr{Where: "ckf.GetCurrentDevice", Desc: err.Error()}
 		} else {
 			res.Device = device.ProtExport()
@@ -144,7 +145,7 @@ func (h ConfigHandler) GetExtendedStatus(ctx context.Context, sessionID int) (re
 
 		ss := h.G().SecretStore()
 		if me != nil && ss != nil {
-			s, err := ss.RetrieveSecret(me.GetNormalizedName())
+			s, err := ss.RetrieveSecret(m, me.GetNormalizedName())
 			if err == nil && !s.IsNil() {
 				res.StoredSecret = true
 			}
@@ -152,7 +153,7 @@ func (h ConfigHandler) GetExtendedStatus(ctx context.Context, sessionID int) (re
 		return nil
 	})
 	if err != nil {
-		h.G().Log.Debug("| could not load me user: %s", err)
+		m.CDebugf("| could not load me user: %s", err)
 		res.DeviceErr = &keybase1.LoadDeviceErr{Where: "libkb.LoadMe", Desc: err.Error()}
 	}
 
@@ -161,7 +162,6 @@ func (h ConfigHandler) GetExtendedStatus(ctx context.Context, sessionID int) (re
 	res.DeviceSigKeyCached = sk != nil
 	res.DeviceEncKeyCached = ek != nil
 
-	m := libkb.NewMetaContext(ctx, h.G())
 	ad := m.ActiveDevice()
 	// cached paper key status
 	if pk := ad.PaperKey(m); pk != nil {
@@ -180,7 +180,7 @@ func (h ConfigHandler) GetExtendedStatus(ctx context.Context, sessionID int) (re
 
 	current, all, err := libkb.GetAllProvisionedUsernames(m)
 	if err != nil {
-		h.G().Log.Debug("| died in GetAllUseranmes()")
+		m.CDebugf("| died in GetAllUseranmes()")
 		return res, err
 	}
 	res.DefaultUsername = current.String()
@@ -338,12 +338,13 @@ func (h ConfigHandler) GetRememberPassphrase(ctx context.Context, sessionID int)
 }
 
 func (h ConfigHandler) SetRememberPassphrase(ctx context.Context, arg keybase1.SetRememberPassphraseArg) error {
+	m := libkb.NewMetaContext(ctx, h.G())
 	remember, err := h.GetRememberPassphrase(ctx, arg.SessionID)
 	if err != nil {
 		return err
 	}
 	if remember == arg.Remember {
-		h.G().Log.Debug("SetRememberPassphrase: no change necessary (remember = %v)", remember)
+		m.CDebugf("SetRememberPassphrase: no change necessary (remember = %v)", remember)
 		return nil
 	}
 
@@ -355,12 +356,12 @@ func (h ConfigHandler) SetRememberPassphrase(ctx context.Context, arg keybase1.S
 	h.G().ConfigReload()
 
 	// replace the secret store
-	if err := h.G().ReplaceSecretStore(); err != nil {
-		h.G().Log.Debug("error replacing secret store for SetRememberPassphrase(%v): %s", arg.Remember, err)
+	if err := h.G().ReplaceSecretStore(ctx); err != nil {
+		m.CDebugf("error replacing secret store for SetRememberPassphrase(%v): %s", arg.Remember, err)
 		return err
 	}
 
-	h.G().Log.Debug("SetRememberPassphrase(%v) success", arg.Remember)
+	m.CDebugf("SetRememberPassphrase(%v) success", arg.Remember)
 
 	return nil
 }
